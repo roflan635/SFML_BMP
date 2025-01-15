@@ -10,10 +10,10 @@ using namespace sf;
 #pragma pack (push,1) // обязательно выключаем выравнивание элементов структур по умолчанию
 struct BitmapFileHeader
 {
-	char  bfType[2];  // сигнатура файла "BM"
+	char bfType[2]; // сигнатура файла "BM"
 	unsigned long bfSize; // размер файла в байтах
-	unsigned short  bfReserved1;
-	unsigned short  bfReserved2;
+	unsigned short bfReserved1;
+	unsigned short bfReserved2;
 	unsigned long bfOffBits; // смещение относительно начала файла в байтах, где располагаются растровые данные
 };
 
@@ -26,17 +26,17 @@ struct BitmapInfoHeader
 	unsigned short biBitCount; // число бит на пиксель
 	unsigned long biCompression; // тип сжатия изображения
 	unsigned long biSizeImage; //размер растрового изображения в байтах
-	long biXPelsPerMeter;  // разрешение изображения по ширине
-	long biYPelsPerMeter;  // разрешение изображения по высоте
+	long biXPelsPerMeter; // разрешение изображения по ширине
+	long biYPelsPerMeter; // разрешение изображения по высоте
 	unsigned long biClrUsed; // число испольщуемых цветов изображения, если == 0, то используются все доступные цвета
-	unsigned long biClrImportant;  // число важных цветов изображения
+	unsigned long biClrImportant; // число важных цветов изображения
 };
 
-struct RGBQuad  // структура элемента таблицы палитры
+struct RGBQuad // структура элемента таблицы палитры
 {
-	unsigned char blue;  // интенсивность синего
+	unsigned char blue; // интенсивность синего
 	unsigned char green; // интенсивность зеленого
-	unsigned char red;   // интенсивность красного
+	unsigned char red; // интенсивность красного
 	unsigned char reserved; // не используется, служит для выравнивания структуры на 4-х байтную границу
 };
 
@@ -44,8 +44,53 @@ struct RGBQuad  // структура элемента таблицы палит
 
 RenderWindow window(VideoMode(1024, 768), "BMP Test");
 
-void Show24BitImage(BitmapFileHeader &BFH, BitmapInfoHeader &BIH, ifstream& f)
+bool CheckBMP(std::string fileName)
 {
+	BitmapFileHeader BFH; // объявляем переменную для хранения заголовка BitmapFileHeader
+	BitmapInfoHeader BIH; // объявляем переменную для хранения заголовка BitmapInfoHeader
+	std::ifstream f(fileName, std::ios::binary); // открываем для фтения файл в бинарном режиме
+	if (!f) // если файл не открыт
+		return false; // выходим с отрицательным результатом
+	f.read((char*)&BFH, sizeof(BitmapFileHeader)); // читаем из файла заголовок BitmapFileHeader в переменную BFH
+	f.read((char*)&BIH, sizeof(BitmapInfoHeader)); // читаем из файла заголовок BitmapInfoHeader в переменную BIH
+	f.seekg(0, std::ios_base::end); // ставим курсор в конец файла
+	if (BIH.biSize != 40 || BFH.bfType[0] != 'B' || BFH.bfType[1] != 'M' || BFH.bfSize != f.tellg()) // проверка файла на некорректность(размер BIH == 40, идентефикация файла на BM, кол-во байт в рамере должно совпадать с положением курсора, который ранее был перемещен в конец)
+		return false;
+	return true;
+}
+
+void Show24BitImage(BitmapFileHeader& BFH, BitmapInfoHeader& BIH, ifstream& f)
+{
+	CircleShape point(1.f);// объявляем объект SFML - окружность дияметром 1, т.к. объекта-точки в SFML нет
+	// вычисляем количество используемых цветов. Если biClrUsed == 0, используются все доступные цвета
+	int colors = (BIH.biClrUsed == 0) ? 16000 : BIH.biClrUsed;
+
+	RGBQuad* palette = new RGBQuad[sizeof(RGBQuad) * colors];// выделяем память для палитры. Количество элементов равно количесвту цветов
+	f.read((char*)palette, sizeof(RGBQuad) * colors);// читаем палитру. Она иет сразу за BitmapInfoHeader
+	f.seekg(BFH.bfOffBits);// позиционируем указатель файла на начало растровых данных
+
+	int rowLength = BIH.biWidth * 3;// вычисляем длину строки изображения в байтах
+	if (rowLength % 4 != 0) // она должна быть кратна 4-м.
+		rowLength = rowLength / 4 * 4 + 4;
+
+	unsigned char* bits = new unsigned char[rowLength];// выделяем память для растровых данных
+	for (int y = BIH.biHeight - 1; y >= 0; y--) // цикл вывода строк. Строки располагаются снизу-вверх
+	{
+		f.read((char*)bits, rowLength); // для каждой строки читаем растровые данные в память
+		for (int x = 0; x < BIH.biWidth; x++) // цикл вывода пикселей строки
+		{
+			unsigned char colorIndex = bits[x];
+			// выбираем из палитрыы элементы с вычисленным индексом и помещаем их в переменные blue, green, red
+			unsigned char blue = palette[colorIndex].blue;
+			unsigned char green = palette[colorIndex].green;
+			unsigned char red = palette[colorIndex].red;
+			point.setFillColor(Color(red, green, blue));// задаем цвет нашей единичной окружности
+			point.setPosition(x, y); // позиционируем окружность в нужную точку окна
+			window.draw(point); // рисуем точку
+		}
+	}
+	delete[] bits; // освобождаем память, выделенную под строку растра
+	delete[] palette; // освобождаем память, выделенную для палитры
 }
 
 void Show8BitImage(BitmapFileHeader& BFH, BitmapInfoHeader& BIH, ifstream& f)
@@ -53,10 +98,12 @@ void Show8BitImage(BitmapFileHeader& BFH, BitmapInfoHeader& BIH, ifstream& f)
 	CircleShape point(1.f);// объявляем объект SFML - окружность дияметром 1, т.к. объекта-точки в SFML нет
 	// вычисляем количество используемых цветов. Если biClrUsed == 0, используются все доступные цвета
 	int colors = (BIH.biClrUsed == 0) ? 256 : BIH.biClrUsed;
+
 	RGBQuad* palette = new RGBQuad[sizeof(RGBQuad) * colors];// выделяем память для палитры. Количество элементов равно количесвту цветов
 	f.read((char*)palette, sizeof(RGBQuad) * colors);// читаем палитру. Она иет сразу за BitmapInfoHeader
 	f.seekg(BFH.bfOffBits);// позиционируем указатель файла на начало растровых данных
-	int rowLength = BIH.biWidth + BIH.biWidth;// вычисляем длину строки изображения в байтах
+
+	int rowLength = BIH.biWidth;// вычисляем длину строки изображения в байтах
 	if (rowLength % 4 != 0) // она должна быть кратна 4-м.
 		rowLength = rowLength / 4 * 4 + 4;
 
@@ -100,7 +147,7 @@ void Show4BitImage(BitmapFileHeader& BFH, BitmapInfoHeader& BIH, ifstream& f)
 	{
 		f.read((char*)bits, rowLength); // для каждой строки читаем растровые данные в память
 		for (int x = 0; x < BIH.biWidth; x++) // цикл вывода пикселей строки
-		{			
+		{
 			// вычисляем индекс цвета colorIndex
 			// индекс цвета может располагаться в 4-х старших или 4-х младших битах проверемого байта
 			// проверяемый байт выичляется x/2, где х - координата х выводимого пикселя
@@ -151,10 +198,10 @@ void Show1BitImage(BitmapFileHeader& BFH, BitmapInfoHeader& BIH, ifstream& f)
 			// х/8 - выражение для вычисления номера байта
 			// bits[x / 8] & mask - выражение для вычисления кстановлен ли соответствующий бит или сброшен
 			// например проверим 6 бит:
-			// байт			01011001
-			// маска		01000000 - в маске должно быть такое число, в котором установлен лишь тот бит, номер которого мы хотим проверить в интересующем байте
-			// результат	01000000 - если результат == 0, то проверемй бит тоже 0, если результат != 0, то бит == 1
-			unsigned char colorIndex = (bits[x / 8] & mask) != 0 ? 1: 0;
+			// байт 01011001
+			// маска 01000000 - в маске должно быть такое число, в котором установлен лишь тот бит, номер которого мы хотим проверить в интересующем байте
+			// результат 01000000 - если результат == 0, то проверемй бит тоже 0, если результат != 0, то бит == 1
+			unsigned char colorIndex = (bits[x / 8] & mask) != 0 ? 1 : 0;
 			// выбираем из палитрыы элементы с вычисленным индексом и помещаем их в переменные blue, green, red
 			unsigned char blue = palette[colorIndex].blue;
 			unsigned char green = palette[colorIndex].green;
@@ -179,7 +226,7 @@ bool ReadAndShowBMP(string FN)
 	if (!f) // если файл не открыт
 		return false; // выходим с отрицательным результатом
 	f.read((char*)&BFH, sizeof(BitmapFileHeader)); // читаем из файла заголовок BitmapFileHeader в переменную BFH
-	f.read((char*) &BIH, sizeof(BitmapInfoHeader));	// читаем из файла заголовок BitmapInfoHeader в переменную BIH
+	f.read((char*)&BIH, sizeof(BitmapInfoHeader)); // читаем из файла заголовок BitmapInfoHeader в переменную BIH
 	switch (BIH.biBitCount) // в зависимости от количества бит на пиксель вызываем разные функции отрисовки изображения
 	{
 	case 1:
@@ -203,7 +250,7 @@ bool ReadAndShowBMP(string FN)
 int main()
 {
 	window.clear(); // очищаем окно
-	ReadAndShowBMP("1.bmp"); // вызываем нашу функцию вывода bmp файла
+	ReadAndShowBMP("24.bmp"); // вызываем нашу функцию вывода bmp файла
 	window.display(); // отображаем построенное изображение нв экране
 	while (window.isOpen()) // ждем закрытия окна
 	{
@@ -215,4 +262,3 @@ int main()
 		}
 	}
 }
-
